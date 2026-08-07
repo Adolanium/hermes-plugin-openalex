@@ -7,7 +7,7 @@ from typing import Any
 from . import config as config_mod
 from . import fields_data, pricing, shaping
 from .budget import tracker
-from .client import get_client
+from .client import get_client, unwrap_rate_limit
 from .errors import AuthError, NotFoundError, OpenAlexError
 from .runtime import (
     bad,
@@ -422,9 +422,10 @@ def openalex_account(args: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
     try:
         # /rate-limit reports the live budget without spending anything, and
         # carries the authoritative price table.
-        info = client.get(
+        raw_info = client.get(
             "rate-limit", cacheable=False, session_id=sess, call_class=pricing.SINGLETON
         )
+        info = unwrap_rate_limit(raw_info)
         payload["account"] = {
             k: v
             for k, v in {

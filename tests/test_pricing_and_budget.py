@@ -150,3 +150,73 @@ class TestBudget:
         tracker.record(predicted=0.01, session_id="alpha")
         tracker.reset("alpha")
         assert tracker.ledger("alpha").actual_usd == 0.0
+
+
+class TestRateLimitUnwrapping:
+    """The live /rate-limit response nests its fields under a wrapper.
+
+    OpenAlex's documented schema lists daily_budget_usd and friends as if they
+    were top level. The real response puts them under a "rate_limit" key
+    alongside api_key and is_grandfathered, so reading the top level yields
+    None for every field and surfaces as "Daily budget None" rather than as an
+    error. This is the actual shape, captured live.
+    """
+
+    LIVE = {
+        "api_key": "2NP...1h2",
+        "is_grandfathered": False,
+        "rate_limit": {
+            "daily_budget_usd": 1,
+            "daily_used_usd": 0.0001,
+            "daily_remaining_usd": 0.9999,
+            "prepaid_balance_usd": 0,
+            "resets_at": "2026-08-08T00:00:00.000Z",
+            "resets_in_seconds": 41901,
+            "endpoint_costs_usd": {
+                "singleton": 0,
+                "list": 0.0001,
+                "search": 0.001,
+                "content": 0.01,
+                "semantic": 0.001,
+                "text": 0.01,
+            },
+        },
+    }
+
+    def test_the_wrapper_is_unwrapped(self):
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        info = unwrap_rate_limit(self.LIVE)
+        assert info["daily_budget_usd"] == 1
+        assert info["daily_remaining_usd"] == 0.9999
+
+    def test_a_flat_response_still_works(self):
+        """Accepted too, in case OpenAlex ever matches its own documentation."""
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        assert unwrap_rate_limit({"daily_budget_usd": 1})["daily_budget_usd"] == 1
+
+    def test_junk_does_not_crash(self):
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        assert unwrap_rate_limit(None) == {}
+        assert unwrap_rate_limit("nope") == {}
+
+    def test_the_live_prices_match_the_shipped_defaults(self):
+        """If OpenAlex repriced, this fails and the table needs updating."""
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        live = unwrap_rate_limit(self.LIVE)["endpoint_costs_usd"]
+        for call_class, price in live.items():
+            assert pricing.cost_of(call_class) == price, call_class
+
+    def test_the_keyed_daily_budget_constant_is_right(self):
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        assert unwrap_rate_limit(self.LIVE)["daily_budget_usd"] == pricing.KEYED_DAILY_USD
+
+    def test_the_api_key_echo_is_never_surfaced(self):
+        """The response echoes a masked key. It must not reach a tool result."""
+        from hermes_plugins.openalex.client import unwrap_rate_limit
+
+        assert "api_key" not in unwrap_rate_limit(self.LIVE)

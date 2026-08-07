@@ -15,7 +15,7 @@ from typing import Any
 from . import config as config_mod
 from . import pricing
 from .budget import tracker
-from .client import get_client, reset_client
+from .client import get_client, reset_client, unwrap_rate_limit
 from .errors import OpenAlexError
 
 try:
@@ -171,7 +171,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
     probe = OpenAlexClient(config_mod.OpenAlexConfig(api_key=key))
     try:
-        info = probe.get("rate-limit", cacheable=False, call_class=pricing.SINGLETON)
+        info = unwrap_rate_limit(
+            probe.get("rate-limit", cacheable=False, call_class=pricing.SINGLETON)
+        )
     except OpenAlexError as exc:
         _say(f"[red]Rejected:[/red] {exc.message}" if _console else f"Rejected: {exc.message}")
         _say("  Nothing was saved.")
@@ -240,7 +242,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     if cfg.has_key:
         try:
-            info = client.get("rate-limit", cacheable=False, call_class=pricing.SINGLETON)
+            info = unwrap_rate_limit(
+                client.get("rate-limit", cacheable=False, call_class=pricing.SINGLETON)
+            )
             remaining = info.get("daily_remaining_usd")
             rows.append(("key valid", _status(True), "accepted"))
             rows.append(

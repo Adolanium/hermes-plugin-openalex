@@ -300,6 +300,26 @@ def _backoff(attempt: int, error: OpenAlexError | None) -> float:
     return (2**attempt) * 0.5 + random.uniform(0, 0.3)
 
 
+def unwrap_rate_limit(payload: Any) -> dict[str, Any]:
+    """Pull the budget fields out of a ``/rate-limit`` response.
+
+    The documented schema lists ``daily_budget_usd`` and friends as if they
+    were top level, but the live response nests them under a ``rate_limit``
+    key alongside ``api_key`` and ``is_grandfathered``. Reading the top level
+    silently yields None for every field, which shows up as "Daily budget
+    None" rather than as an error.
+
+    Both shapes are accepted so this keeps working if OpenAlex ever flattens
+    it to match its own documentation.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    inner = payload.get("rate_limit")
+    if isinstance(inner, dict):
+        return inner
+    return payload
+
+
 def _decode(response: Any) -> tuple[Any, str]:
     """Return ``(parsed_or_None, raw_text)``.
 
