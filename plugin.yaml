@@ -1,0 +1,32 @@
+name: openalex
+version: 0.1.0
+manifest_version: 1
+description: >-
+  OpenAlex for Hermes. Search 250M scholarly works, authors, journals and
+  institutions, with a USD budget guard, per-call cost prediction, and
+  response shaping that keeps a 2.8 MB paper inside the context window.
+author: Adolanium
+kind: standalone
+
+provides_tools:
+  - openalex_resolve
+  - openalex_get
+  - openalex_count
+  - openalex_search
+  - openalex_related
+  - openalex_account
+  - openalex_fields
+
+provides_hooks:
+  - on_session_start
+  - on_session_reset
+
+requires_env:
+  - name: OPENALEX_API_KEY
+    description: >-
+      OpenAlex API key. Free, from https://openalex.org/settings/api, and it
+      raises the daily budget from $0.10 to $1.00. Without one the plugin
+      still runs: ID lookups and autocomplete are free and keep working even
+      at zero budget.
+    url: https://openalex.org/settings/api
+    secret: true
