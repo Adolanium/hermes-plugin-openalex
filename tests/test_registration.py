@@ -102,6 +102,26 @@ class TestVisibility:
         config_mod.reset()
         assert registered.tools["openalex_classify"]["check_fn"]() is True
 
+    def test_the_cli_and_the_model_see_the_same_set(self, registered, isolated_config):
+        """visible_tools is the single source of truth.
+
+        The CLI prints cfg.visible_tools() while registration gates on
+        check_fn. If those diverge, `hermes openalex profile` advertises tools
+        the model cannot actually call.
+        """
+        for settings in (
+            {},
+            {"profile": "full"},
+            {"profile": "full", "budget": {"allow_text_classification": True}},
+            {"profile": "full", "tools": {"disabled": ["openalex_search"]}},
+        ):
+            isolated_config.clear()
+            isolated_config.update(settings)
+            config_mod.reset()
+            from_check = {n for n, e in registered.tools.items() if e["check_fn"]()}
+            from_config = config_mod.load(refresh=True).visible_tools()
+            assert from_check == from_config, settings
+
     def test_everything_core_works_without_a_key(self, registered, isolated_config):
         """Unlike a keyless API, OpenAlex just gives you a smaller budget."""
         config_mod.reset()

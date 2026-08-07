@@ -97,12 +97,22 @@ class OpenAlexConfig:
         return bool(self.api_key)
 
     def visible_tools(self) -> set[str]:
+        """Exactly the tools the model is offered.
+
+        This is the single source of truth for visibility, so the CLI cannot
+        report a different set from the one registration actually exposes.
+        """
         base = set(CORE_TOOLS) if self.profile == "core" else set(ALL_TOOLS)
         for name in self.tools_enabled:
             if name in ALL_TOOLS:
                 base.add(name)
         for name in self.tools_disabled:
             base.discard(name)
+        # Text classification needs its own opt-in on top of the profile,
+        # because at $0.01 a call it is a hundred times a list call. A tool
+        # that would always refuse is noise in the schema.
+        if not self.budget.allow_text_classification:
+            base.discard("openalex_classify")
         return base
 
 

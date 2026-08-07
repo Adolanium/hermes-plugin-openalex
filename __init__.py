@@ -42,22 +42,15 @@ def _visible(name: str) -> bool:
     """Should this tool be offered to the model right now?
 
     Unlike a keyless API, OpenAlex works anonymously for every tool, just on a
-    tenth of the budget. So the only gates are the profile and, for text
-    classification, an explicit opt-in. A tool that would always refuse is
-    hidden rather than advertised.
+    tenth of the budget, so the gating all lives in the config rather than
+    depending on whether a key is present.
 
-    The registry caches this for about 30 seconds, so it is cheap to be
-    thorough.
+    The registry caches this for about 30 seconds, so it is cheap to call.
     """
     try:
-        cfg = config_mod.load()
+        return name in config_mod.load().visible_tools()
     except Exception:
         return True  # fail open rather than silently losing the toolset
-    if name not in cfg.visible_tools():
-        return False
-    if name == "openalex_classify":
-        return cfg.budget.allow_text_classification
-    return True
 
 
 def _make_check(name: str) -> Callable[[], bool]:
