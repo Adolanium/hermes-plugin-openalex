@@ -222,11 +222,15 @@ def openalex_count(args: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
     if filter_expr:
         params["filter"] = filter_expr
     if group_by:
+        # OpenAlex rejects select alongside group_by with
+        # "select does not work with group_by". A grouped response carries no
+        # records anyway, so neither select nor per_page has anything to do.
         params["group_by"] = group_by
-    # A count never needs the records themselves, and one selected field keeps
-    # the response tiny even when group_by is absent.
-    params["per_page"] = 1
-    params["select"] = "id"
+    else:
+        # An ungrouped count still returns a results array, so ask for the
+        # smallest possible one.
+        params["per_page"] = 1
+        params["select"] = "id"
 
     client = get_client(cfg)
     raw = client.get(

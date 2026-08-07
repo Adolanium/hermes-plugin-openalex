@@ -129,11 +129,24 @@ class TestCount:
         result = call(handlers_core.openalex_count, {"group_by": "publication_year"})
         assert "200 groups" in result["groups_truncated"]
 
-    def test_count_never_pulls_records(self, fake_client, budget_reset):
+    def test_ungrouped_count_asks_for_the_smallest_possible_page(self, fake_client, budget_reset):
         _, transport = fake_client([FakeResponse(200, {"meta": {"count": 1}})])
         call(handlers_core.openalex_count, {"filter": "is_oa:true"})
         assert transport.calls[0]["params"]["per_page"] == 1
         assert transport.calls[0]["params"]["select"] == "id"
+
+    def test_grouped_count_sends_no_select(self, fake_client, budget_reset):
+        """OpenAlex 400s with "select does not work with group_by".
+
+        A grouped response carries no records, so neither select nor per_page
+        has anything to do. Sending select made every grouped count fail.
+        """
+        _, transport = fake_client([FakeResponse(200, {"meta": {"count": 1}, "group_by": []})])
+        call(handlers_core.openalex_count, {"filter": "is_oa:true", "group_by": "publication_year"})
+        params = transport.calls[0]["params"]
+        assert "select" not in params
+        assert "per_page" not in params
+        assert params["group_by"] == "publication_year"
 
 
 class TestSearch:
