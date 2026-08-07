@@ -1,6 +1,8 @@
 # hermes-plugin-openalex
 
-[OpenAlex](https://openalex.org) for [Hermes Agent](https://github.com/NousResearch/hermes-agent). 250 million scholarly works, 90 million authors, every journal and institution, exposed as nine tools with a spend guard that refuses before it costs you anything.
+[OpenAlex](https://openalex.org) for [Hermes Agent](https://github.com/NousResearch/hermes-agent). 250 million scholarly works, 90 million authors, every journal and institution, as nine tools with a spend guard that refuses before it costs you anything.
+
+Works with **no API key**. The anonymous tier gets $0.10 a day; a free key raises it to $1.00. Identifier lookups and name resolution cost **nothing** and keep working even when the daily budget is gone.
 
 ```bash
 hermes plugins install Adolanium/hermes-plugin-openalex --enable
@@ -10,7 +12,70 @@ hermes plugins install Adolanium/hermes-plugin-openalex --enable
 hermes plugins remove openalex
 ```
 
-Works with **no API key**. The anonymous tier gets $0.10 a day, and a free key raises it to $1.00. Identifier lookups and name resolution cost nothing at all and keep working even when the daily budget is gone.
+Install clones the plugin, optionally prompts for `OPENALEX_API_KEY`, writes it to `~/.hermes/.env`, and enables it. Restart the gateway if one is running. Tools show up everywhere at once (desktop, CLI, TUI, gateway, ACP, cron) because every Hermes frontend shares the same tool registry.
+
+---
+
+## Demo
+
+Free name resolution, free DOI fetch shaped for the context window, then cheap grouped counts over the whole literature (GNN, LLM, open access). No pitch, just the CLI.
+
+![hermes openalex demo](docs/demo.gif)
+
+[mp4](docs/demo.mp4)
+
+---
+
+## Try it
+
+After install (key optional; free calls work without one):
+
+```bash
+hermes openalex resolve "bengio" --entity authors
+hermes openalex get 10.7717/peerj.4375
+hermes openalex count --search "graph neural network" --group-by publication_year
+hermes openalex count --search "large language model" --group-by publication_year
+hermes openalex count --filter 'is_oa:true,publication_year:2024' --group-by 'open_access.oa_status'
+hermes openalex doctor
+```
+
+Captured live (numbers move as the index moves):
+
+| Call | Result | Cost |
+|---|---|---:|
+| resolve `"bengio"` | Yoshua Bengio ~1,290 works, plus other Bengios | **free** |
+| get DOI `10.7717/peerj.4375` | State of OA paper, 1,241 citations, gold OA | **free** |
+| count GNN by year | **~888k** works | $0.0001 |
+| count LLM by year | **~4.1M** works | $0.0001 |
+| count OA 2024 by status | **~6.6M** works | $0.0001 |
+
+```
+$ hermes openalex count --search "large language model" --group-by publication_year
+4,081,607 works
+publication_year
+  value      count
+  2025     503,881
+  2024     422,529
+  2023     397,150
+  ...
+this call $0.0001 (list)   session $0.0001 of $0.0500
+```
+
+Same question via `search` would cost **10x** and return one page you would then aggregate yourself.
+
+```
+$ hermes openalex get 10.7717/peerj.4375
+╭──────────────────────────────── W2741809807 ─────────────────────────────────╮
+│ The state of OA: a large-scale analysis of the prevalence and impact of Open │
+│ Access articles · 2018 · PeerJ                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  doi          10.7717/peerj.4375
+  citations    1,241
+  open access  gold
+  ...
+```
+
+OpenAlex sent ~33k characters for that record. Shaped summary is ~1.9k (**17x smaller**).
 
 ---
 
@@ -107,7 +172,8 @@ Real captured output.
 $ hermes openalex resolve "bengio" --entity authors
 'bengio'  (free)
   id            name              type    works   hint
-  A5039786469   Bengio            author  1,247   Mila, Université de Montréal
+  A5086198262   Yoshua Bengio     author  1,290   Mila / Université de Montréal
+  A5017529415   Samy Bengio       author  391
 ```
 
 Filtering on that id is exact and cheap. Searching the name is fuzzy, ten times the price, and matches every acknowledgement and reference list the string appears in.
@@ -116,11 +182,12 @@ Filtering on that id is exact and cheap. Searching the name is fuzzy, ten times 
 
 ```
 $ hermes openalex count --search "graph neural network" --group-by publication_year
+887,992 works
 publication_year
-  value    count
-  2024    28,417
-  2023    24,902
-  2022    18,330
+  value      count
+  2025     134,581
+  2024     134,292
+  2023     129,716
   ...
 this call $0.0001 (list)   session $0.0001 of $0.0500
 ```
@@ -138,7 +205,7 @@ Same question via search would cost $0.0010 and return one page you would have t
     "title": "The state of OA: a large-scale analysis of the prevalence and impact of Open Access articles",
     "year": 2018,
     "type": "article",
-    "cited_by_count": 1543,
+    "cited_by_count": 1241,
     "authors": [
       {"name": "Heather Piwowar", "id": "A5048491430", "institutions": ["Impactstory"]}
     ],
