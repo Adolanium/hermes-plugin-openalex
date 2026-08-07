@@ -127,8 +127,19 @@ appears in acknowledgements and reference lists.
 **Paging a search to count things.** If the question is "how many", one grouped
 count answers it for a tenth of one page.
 
-**Classifying text that is already indexed.** `openalex_classify` costs $0.01.
-If the work has a DOI, `openalex_get` returns its topics for free.
+**Classifying text that is already indexed.** `openalex_classify` costs $0.01
+and is not merely more expensive, it is less accurate. Classifying the title
+and abstract of "Attention Is All You Need" returns *Cognitive Science and
+Education Research* under Neuroscience, apparently misled by the word
+attention. The indexed record for the same paper says *Natural Language
+Processing Techniques* under Computer Science, and costs nothing:
+
+```
+openalex_resolve(query="attention is all you need")   free  -> W2626778328
+openalex_get(id="W2626778328")                        free  -> the right topic
+```
+
+Reserve the classifier for text that genuinely is not in OpenAlex.
 
 **Fetching at raw verbosity by habit.** A single work by a large collaboration
 came to 2.88 MB, 93% of it one author list. Summary verbosity is a few hundred

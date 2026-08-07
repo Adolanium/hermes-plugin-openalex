@@ -293,10 +293,16 @@ OPENALEX_CLASSIFY = {
         "COSTS $0.01 PER CALL. That is a hundred times a list call, and ten "
         "calls exhaust the entire anonymous daily budget. It is disabled by "
         "default and must be enabled explicitly in config.\n\n"
-        "Before using it, check whether the work already exists in OpenAlex: "
-        "if it does, openalex_get returns its topics for free. This tool is "
-        "only for text that is not already indexed, such as an unpublished "
-        "abstract or a grant proposal."
+        "Before using it, check whether the work already exists in OpenAlex. "
+        "If it does, openalex_get returns its topics for free AND more "
+        "accurately. Measured: classifying the title and abstract of "
+        "'Attention Is All You Need' returned 'Cognitive Science and Education "
+        "Research' under Neuroscience, apparently misled by the word "
+        "attention, while the indexed record for the same paper says 'Natural "
+        "Language Processing Techniques' under Computer Science.\n\n"
+        "So this tool is only for text that is genuinely not in OpenAlex, such "
+        "as an unpublished abstract or a grant proposal. For anything with a "
+        "DOI, resolve and fetch instead."
     ),
     "parameters": {
         "type": "object",
