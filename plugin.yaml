@@ -17,6 +17,8 @@ provides_tools:
   - openalex_account
   - openalex_fields
   - openalex_fulltext
+  - openalex_classify
+  - openalex_harvest
 
 provides_hooks:
   - on_session_start
