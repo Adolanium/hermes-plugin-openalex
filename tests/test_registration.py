@@ -140,8 +140,8 @@ class TestManifest:
         assert manifest["manifest_version"] == 1
         assert manifest["version"] == plugin.__version__
 
-    def test_declared_tools_are_the_core_profile(self):
-        assert set(self._manifest()["provides_tools"]) == config_mod.CORE_TOOLS
+    def test_declared_tools_match_all_registered_tools(self, registered):
+        assert set(self._manifest()["provides_tools"]) == set(registered.tools)
 
     def test_declared_hooks_are_registered(self, registered):
         assert set(self._manifest()["provides_hooks"]) <= set(registered.hooks)
