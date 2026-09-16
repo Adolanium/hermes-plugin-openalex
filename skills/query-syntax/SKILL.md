@@ -106,7 +106,7 @@ closed), `has_fulltext`, `best_oa_location.license`
 `sustainable_development_goals.id`
 
 **Works, citation graph**
-`cites:W...` (works this one cites), `cited_by:W...` (works citing it),
+`cites:W...` (works citing this one), `cited_by:W...` (works this one cites),
 `related_to:W...`. The `openalex_related` tool wraps these.
 
 **Authors** `orcid`, `affiliations.institution.ror`, `works_count`,

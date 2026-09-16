@@ -1,5 +1,5 @@
 name: openalex
-version: 0.1.0
+version: 0.1.1
 manifest_version: 1
 description: >-
   OpenAlex for Hermes. Search 250M scholarly works, authors, journals and

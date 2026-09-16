@@ -18,7 +18,7 @@ from . import config as config_mod
 from . import pricing
 from .budget import tracker
 from .client import get_client
-from .errors import OpenAlexError, redact
+from .errors import OpenAlexError, redact, redact_payload
 from .shaping import envelope, fit
 
 logger = logging.getLogger(__name__)
@@ -36,17 +36,16 @@ def tool(fn: Callable[..., dict[str, Any]]) -> Callable[..., str]:
     @functools.wraps(fn)
     def wrapper(args: dict[str, Any], **kwargs: Any) -> str:
         args = args if isinstance(args, dict) else {}
+        key = None
+        cfg = None
         try:
+            cfg = config_mod.load()
+            key = cfg.api_key
             result = fn(args, **kwargs)
         except OpenAlexError as exc:
-            result = exc.to_payload()
+            result = redact_payload(exc.to_payload(), key)
         except Exception as exc:  # pragma: no cover - the safety net
-            logger.exception("openalex tool %s failed unexpectedly", fn.__name__)
-            key = None
-            try:
-                key = config_mod.load().api_key
-            except Exception:
-                pass
+            logger.error("openalex tool %s failed: %s", fn.__name__, redact(str(exc), key))
             result = {
                 "ok": False,
                 "error": redact(f"{type(exc).__name__}: {exc}", key),
@@ -59,7 +58,7 @@ def tool(fn: Callable[..., dict[str, Any]]) -> Callable[..., str]:
                 ),
             }
         try:
-            return json.dumps(result, default=str)
+            return json.dumps(fit(result, cfg.max_result_chars if cfg else 24000), default=str)
         except Exception:
             return json.dumps({"ok": False, "error": "Result was not serializable."})
 

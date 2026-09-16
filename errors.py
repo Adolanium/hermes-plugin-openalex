@@ -39,6 +39,17 @@ def redact(text: str, api_key: str | None = None) -> str:
     return re.sub(r"(?i)([?&]api_key=)[^&\s]+", r"\1" + _REDACTED, out)
 
 
+def redact_payload(value: Any, api_key: str | None = None) -> Any:
+    """Redact nested messages and details without altering JSON structure."""
+    if isinstance(value, str):
+        return redact(value, api_key)
+    if isinstance(value, dict):
+        return {redact(str(k), api_key): redact_payload(v, api_key) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact_payload(v, api_key) for v in value]
+    return value
+
+
 class OpenAlexError(Exception):
     """Base. Handlers catch these and never let one escape."""
 

@@ -73,6 +73,8 @@ this call $0.0000 (singleton)
 
 `get` is a catalog record, not the PDF. `fulltext` without `--confirm` only asks whether OpenAlex holds the text. `--confirm` is the download.
 
+Fulltext downloads accept only `https://content.openalex.org` and do not follow redirects. Downloads stop at 8 MiB, and gzip expansion stops at 32 MiB. Tool responses stay within `max_result_chars`, including truncation notices. A shortened response is incomplete; narrow the query or request fewer fields when needed.
+
 ---
 
 ## OpenAlex prices (February 2026)
@@ -90,6 +92,8 @@ The API is usage-priced in dollars by call shape. [OpenAlex announcement](https:
 A query with `group_by` is billed as a list call even when a search term is present. That is OpenAlex's price table, not a plugin discount. `count` returns totals and groups. `search` returns records. They are different responses.
 
 OpenAlex bills $0.0001 on a rejected 400. The plugin predicts cost from the call shape and refuses locally when the session budget would be exceeded, so that refusal is not sent and is not billed. A 400 that does go out is still billed.
+
+Each request reserves its predicted cost before sending, so concurrent calls share the same remaining session budget. Every retry is checked separately. Response headers settle the charge; when a connection fails without a reported cost, the local ledger keeps the estimate because billing is unknown. A server charge above the estimate can still exceed the local limit.
 
 OpenAlex returns 429 for both a short throttle and a spent daily budget. During a throttle, `X-RateLimit-Remaining` can be 0 while budget remains. `Retry-After` is the field that distinguishes them: about a second versus tens of thousands (until midnight UTC). The plugin retries the first and does not retry the second.
 

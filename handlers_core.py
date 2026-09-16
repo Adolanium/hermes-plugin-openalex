@@ -252,9 +252,18 @@ def openalex_count(args: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         groups = shaping.shape_groups(raw.get("group_by"))
         payload["group_by"] = group_by
         payload["groups"] = groups
+        available = len(raw.get("group_by") or [])
+        payload["groups_returned"] = len(groups)
+        payload["groups_available"] = available
+        if len(groups) < available:
+            payload["groups_truncated"] = (
+                "Some groups returned by OpenAlex were omitted locally. "
+                "Narrow the filter to see omitted groups."
+            )
         if meta.get("groups_count") == 200:
             payload["groups_truncated"] = (
-                "OpenAlex caps group_by at 200 groups, so this is the head of "
+                payload.get("groups_truncated", "")
+                + " OpenAlex caps group_by at 200 groups, so this is the head of "
                 "the distribution rather than all of it. Narrow the filter to "
                 "see the tail."
             )

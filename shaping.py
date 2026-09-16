@@ -470,7 +470,7 @@ def strip_heavy(obj: Any) -> Any:
     return out
 
 
-_CONTAINER_KEYS = ("results", "works", "authors", "groups", "matches", "items")
+_CONTAINER_KEYS = ("results", "records", "works", "authors", "groups", "matches", "items")
 
 
 def _find_containers(payload: Any) -> list[tuple]:
@@ -492,6 +492,8 @@ def _find_containers(payload: Any) -> list[tuple]:
 
 
 def _walk_records(payload: Any) -> Iterable[dict[str, Any]]:
+    if isinstance(payload, dict) and isinstance(payload.get("record"), dict):
+        yield payload["record"]
     for _parent, _key, items in _find_containers(payload):
         for item in items:
             if isinstance(item, dict):
@@ -523,7 +525,7 @@ def fit(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
         record.pop("abstract", None)
     notes.append("abstracts dropped")
     if size(trimmed) <= max_chars:
-        return _finish(trimmed, notes)
+        return _finish(trimmed, notes, max_chars)
 
     # 2. Author lists past the first few, and secondary classification.
     for record in _walk_records(trimmed):
@@ -534,7 +536,7 @@ def fit(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
             record.pop(key, None)
     notes.append("author lists capped at 3, keywords and topics dropped")
     if size(trimmed) <= max_chars:
-        return _finish(trimmed, notes)
+        return _finish(trimmed, notes, max_chars)
 
     # 3. Fewer records, halving the longest list each round. Dropped counts are
     #    accumulated and reported once at the end: appending a note per round
@@ -556,27 +558,79 @@ def fit(payload: dict[str, Any], max_chars: int) -> dict[str, Any]:
     for key, dropped in dropped_by_key.items():
         notes.append(f"{dropped} {key} omitted to fit the size budget")
     if size(trimmed) <= max_chars:
-        return _finish(trimmed, notes)
+        return _finish(trimmed, notes, max_chars)
 
-    # 4. Last resort. Empty the collections rather than return unparseable JSON.
-    for parent, key, items in _find_containers(trimmed):
-        if items:
-            notes.append(f"all {len(items)} {key} dropped, the payload could not be fitted")
-            parent[key] = []
-    if size(trimmed) > max_chars:
-        notes.append(
-            "result still exceeds the size budget. Narrow the query, lower "
-            "per_page, or raise plugins.entries.openalex.max_result_chars"
-        )
-    return _finish(trimmed, notes)
+    return _finish(trimmed, notes, max_chars)
 
 
-def _finish(payload: dict[str, Any], notes: list[str]) -> dict[str, Any]:
+def _finish(payload: dict[str, Any], notes: list[str], max_chars: int) -> dict[str, Any]:
     if notes:
         # Deduplicate while preserving order. The same degradation can be
         # recorded more than once when several containers are trimmed.
         payload["_truncation"] = list(dict.fromkeys(notes))
-    return payload
+    if "groups" in payload and "groups_returned" in payload:
+        payload["groups_returned"] = len(payload["groups"])
+        if payload["groups_returned"] < payload.get("groups_available", 0):
+            payload.setdefault(
+                "groups_truncated",
+                "Some groups returned by OpenAlex were omitted locally. Narrow the filter.",
+            )
+    size = lambda: len(json.dumps(payload, default=str))  # noqa: E731
+    if size() <= max_chars:
+        return payload
+
+    payload["_truncation"] = ["Result shortened to fit max_result_chars; data is incomplete."]
+    if size() <= max_chars:
+        return payload
+
+    def strings(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "_truncation":
+                    continue
+                if isinstance(value, str) and len(value) > 64:
+                    yield node, key, value
+                else:
+                    yield from strings(value)
+        elif isinstance(node, list):
+            for key, value in enumerate(node):
+                if isinstance(value, str) and len(value) > 64:
+                    yield node, key, value
+                else:
+                    yield from strings(value)
+
+    # Bound large scalar fields too, including fulltext and singleton titles.
+    for parent, key, value in sorted(strings(payload), key=lambda x: len(x[2]), reverse=True):
+        low, high = 64, len(value)
+        parent[key] = value[:low]
+        if size() > max_chars:
+            continue
+        while low < high:
+            mid = (low + high + 1) // 2
+            parent[key] = value[:mid]
+            if size() <= max_chars:
+                low = mid
+            else:
+                high = mid - 1
+        parent[key] = value[:low]
+        return payload
+
+    for parent, key, _items in _find_containers(payload):
+        parent[key] = []
+        if key == "groups" and "groups_returned" in parent:
+            parent["groups_returned"] = 0
+        if size() <= max_chars:
+            return payload
+    # Arbitrarily large mappings or field names cannot always retain a record.
+    fallback = {
+        "ok": False,
+        "error_kind": "result_too_large",
+        "error": "Result exceeds max_result_chars. Narrow the query or request fewer fields.",
+        "_truncation": ["Result omitted."],
+    }
+    if len(json.dumps(fallback)) <= max_chars:
+        return fallback
+    return {}
 
 
 def envelope(

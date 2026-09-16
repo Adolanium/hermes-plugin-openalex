@@ -15,6 +15,7 @@ says so rather than quietly trusting its own model of someone else's pricing.
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from .errors import LocalBudgetError
@@ -28,6 +29,7 @@ _PRECISION = 6
 class Ledger:
     predicted_usd: float = 0.0
     actual_usd: float = 0.0
+    reserved_usd: float = 0.0
     calls: int = 0
     free_calls: int = 0
     cache_hits: int = 0
@@ -35,11 +37,12 @@ class Ledger:
     by_class: dict[str, int] = field(default_factory=dict)
 
     def snapshot(self, limit: float) -> dict[str, object]:
-        spent = round(self.actual_usd or self.predicted_usd, _PRECISION)
+        spent = round(self.actual_usd, _PRECISION)
         return {
             "spent_usd": spent,
             "budget_usd": round(limit, _PRECISION),
-            "remaining_usd": round(max(0.0, limit - spent), _PRECISION),
+            "remaining_usd": round(max(0.0, limit - spent - self.reserved_usd), _PRECISION),
+            "reserved_usd": round(self.reserved_usd, _PRECISION),
             "predicted_usd": round(self.predicted_usd, _PRECISION),
             "calls": self.calls,
             "free_calls": self.free_calls,
@@ -54,7 +57,7 @@ class BudgetTracker:
 
     def __init__(self) -> None:
         self._ledgers: dict[str, Ledger] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _key(self, session_id: str | None) -> str:
         return str(session_id) if session_id else "default"
@@ -73,7 +76,7 @@ class BudgetTracker:
             return
         led = self.ledger(session_id)
         with self._lock:
-            spent = led.actual_usd or led.predicted_usd
+            spent = led.actual_usd + led.reserved_usd
             if spent + cost > limit + 1e-12:
                 remaining = max(0.0, limit - spent)
                 raise LocalBudgetError(
@@ -85,6 +88,37 @@ class BudgetTracker:
                         "remaining_usd": round(remaining, _PRECISION),
                         "budget_usd": round(limit, _PRECISION),
                     },
+                )
+
+    @contextmanager
+    def charge(self, cost, *, limit=None, session_id=None, call_class="list"):
+        """Reserve before sending; settle each attempt, including failed requests.
+
+        When a transport failure leaves billing unknown, retain the estimate.
+        The caller can replace it with the cost reported in response headers.
+        """
+        with self._lock:
+            if limit is not None:
+                self.check(cost, limit=limit, session_id=session_id)
+            led = self.ledger(session_id)
+            led.reserved_usd += cost
+        actual = cost
+
+        def settle(value):
+            nonlocal actual
+            if value is not None:
+                actual = value
+
+        try:
+            yield settle
+        finally:
+            with self._lock:
+                led.reserved_usd -= cost
+                self.record(
+                    predicted=cost,
+                    actual=actual,
+                    call_class=call_class,
+                    session_id=session_id,
                 )
 
     def record(

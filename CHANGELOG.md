@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+- Reserve session budget before each request, including retries. Record failed
+  requests using reported costs, or the estimate when billing is unknown.
+- Enforce response character limits for fulltext, singleton records, batches,
+  and errors, including truncation notices.
+- Restrict authenticated fulltext downloads to `https://content.openalex.org`,
+  with redirects disabled, an 8 MiB download cap, and a 32 MiB expansion cap.
+- Redact API keys from upstream error messages, nested details, and logs.
+- Report locally omitted groups and correct the query skill's citation directions.
+
 ## 0.1.0
 
 First release.

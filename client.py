@@ -19,6 +19,7 @@ import random
 import threading
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
 from . import config as config_mod
 from . import pricing
@@ -32,11 +33,14 @@ from .errors import (
     UpstreamError,
     classify_http,
     redact,
+    redact_payload,
 )
 
 logger = logging.getLogger(__name__)
 
 BASE = "https://api.openalex.org"
+MAX_CONTENT_BYTES = 8 * 1024 * 1024
+MAX_EXPANDED_BYTES = 32 * 1024 * 1024
 
 _RETRY_STATUSES = {500, 502, 503, 504}
 
@@ -204,15 +208,13 @@ class OpenAlexClient:
                 tracker.record_cache_hit(cost, session_id)
                 return hit
 
-        if cost > 0 and budget_usd is not None:
-            tracker.check(cost, limit=budget_usd, session_id=session_id)
-
-        result, actual = self._send_with_retries(path, params)
-        tracker.record(
-            predicted=cost,
-            actual=actual,
-            call_class=price_class,
+        result, actual = self._send_with_retries(
+            path,
+            params,
+            cost=cost,
+            price_class=price_class,
             session_id=session_id,
+            budget_usd=budget_usd,
         )
 
         if cache_key:
@@ -235,47 +237,80 @@ class OpenAlexClient:
         than a ``Content-Encoding`` header, so httpx does not transparently
         decompress it and reading ``.text`` yields binary noise.
         """
+        parsed_url = urlsplit(url)
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname != "content.openalex.org"
+            or parsed_url.port not in (None, 443)
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+        ):
+            raise TransportError("Fulltext URL must use https://content.openalex.org.")
         cost = pricing.cost_of(pricing.CONTENT)
-        if cost > 0 and budget_usd is not None:
-            tracker.check(cost, limit=budget_usd, session_id=session_id)
 
         import httpx
 
         self.limiter.acquire()
         try:
-            response = self._http().get(url)
+            with tracker.charge(
+                cost,
+                limit=budget_usd,
+                session_id=session_id,
+                call_class=pricing.CONTENT,
+            ) as settle:
+                with self._http().stream(
+                    "GET", url, headers={"Accept-Encoding": "identity"}
+                ) as response:
+                    settle(self.meter.update(response))
+                    encoding = response.headers.get("content-encoding", "identity").lower()
+                    if encoding not in ("identity", "gzip"):
+                        raise TransportError("OpenAlex returned unsupported content encoding.")
+                    chunks = bytearray()
+                    for chunk in response.iter_raw(chunk_size=65536):
+                        if len(chunks) + len(chunk) > MAX_CONTENT_BYTES:
+                            raise TransportError("Fulltext download exceeds the 8 MiB limit.")
+                        chunks.extend(chunk)
+                    payload = bytes(chunks)
+                    if response.status_code >= 300:
+                        body_text = payload.decode("utf-8", "replace")
+                        try:
+                            parsed = json.loads(body_text)
+                        except ValueError:
+                            parsed = None
+                        raise classify_http(
+                            response.status_code,
+                            redact(body_text, self.cfg.api_key),
+                            redact_payload(parsed, self.cfg.api_key),
+                            retry_after=_header_float(response, "retry-after"),
+                            cost_required=_header_float(response, "x-ratelimit-cost-required-usd"),
+                        )
         except httpx.HTTPError as exc:
             raise TransportError(
                 f"Could not download content: {redact(str(exc), self.cfg.api_key)}"
             ) from exc
 
-        actual = self.meter.update(response)
-        if response.status_code >= 300:
-            parsed, body_text = _decode(response)
-            raise classify_http(
-                response.status_code,
-                body_text,
-                parsed,
-                retry_after=_header_float(response, "retry-after"),
-                cost_required=_header_float(response, "x-ratelimit-cost-required-usd"),
-            )
-
-        tracker.record(
-            predicted=cost,
-            actual=actual,
-            call_class=pricing.CONTENT,
-            session_id=session_id,
-        )
-
-        payload = response.content
         if payload[:2] == b"\x1f\x8b":  # gzip magic number
             import gzip
+            import io
 
-            payload = gzip.decompress(payload)
+            try:
+                with gzip.GzipFile(fileobj=io.BytesIO(payload)) as archive:
+                    payload = archive.read(MAX_EXPANDED_BYTES + 1)
+            except (OSError, EOFError) as exc:
+                raise TransportError("OpenAlex returned invalid gzip content.") from exc
+        if len(payload) > MAX_EXPANDED_BYTES:
+            raise TransportError("Expanded fulltext exceeds the 32 MiB limit.")
         return payload.decode("utf-8", "replace")
 
     def _send_with_retries(
-        self, path: str, params: dict[str, Any]
+        self,
+        path: str,
+        params: dict[str, Any],
+        *,
+        cost: float,
+        price_class: str,
+        session_id: str | None,
+        budget_usd: float | None,
     ) -> tuple[dict[str, Any], float | None]:
         import httpx
 
@@ -286,7 +321,15 @@ class OpenAlexClient:
         for attempt in range(attempts):
             self.limiter.acquire()
             try:
-                response = self._http().get(url, params=params)
+                with tracker.charge(
+                    cost,
+                    limit=budget_usd,
+                    session_id=session_id,
+                    call_class=price_class,
+                ) as settle:
+                    response = self._http().get(url, params=params)
+                    actual = self.meter.update(response)
+                    settle(actual)
             except httpx.TimeoutException as exc:
                 last_error = TransportError(
                     f"Request timed out after {self.cfg.timeout_seconds:.0f}s: "
@@ -297,7 +340,6 @@ class OpenAlexClient:
                     f"Network error reaching OpenAlex: {redact(str(exc), self.cfg.api_key)}"
                 )
             else:
-                actual = self.meter.update(response)
                 parsed, body_text = _decode(response)
 
                 if response.status_code < 300:
@@ -310,8 +352,8 @@ class OpenAlexClient:
 
                 error = classify_http(
                     response.status_code,
-                    body_text,
-                    parsed,
+                    redact(body_text, self.cfg.api_key),
+                    redact_payload(parsed, self.cfg.api_key),
                     retry_after=_header_float(response, "retry-after"),
                     cost_required=_header_float(response, "x-ratelimit-cost-required-usd"),
                 )
